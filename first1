@@ -1,0 +1,287 @@
+//	Game Class Using OpenGL & Glut (Implementation Main), ver. 0.6
+//	Dept. Software Convergence, Kyung Hee University
+//	Prof. Daeho Lee, nize@khu.ac.kr
+
+#pragma warning(disable: 4996)
+
+#include "Game.h"
+#include "Bmp.h"
+#include "LodePng.h"
+
+CGame::CGame(int nW, int nH, int nPosX, int nPosY)
+{
+	m_nW = nW;
+	m_nH = nH;
+
+	m_nPosX = nPosX;
+	m_nPosY = nPosY;
+
+	m_bPause = false;
+
+	m_bCreated = false;
+
+	if (nInstanceCnt == 0) pInstance = this;
+
+	nInstanceCnt++;
+}
+
+CGame::~CGame()
+{
+	if (m_bCreated)
+		ShutdownApp();
+
+	nInstanceCnt--;
+}
+
+void CGame::Create(int arg, char **argc, float *fBgColor, double(*dLookAt)[3], bool bVSync)
+{
+	glutInitWindowSize(m_nW, m_nH);
+	glutInitWindowPosition(m_nPosX, m_nPosY);
+
+	glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
+
+	glutInit(&arg, argc);
+	glutCreateWindow("Types of Light");
+
+	m_nFrame = 0;
+	m_nBaseTime = glutGet(GLUT_ELAPSED_TIME);
+	m_nPreviousTime = m_nBaseTime;
+
+	glutDisplayFunc(RenderSceneStatic);
+	glutReshapeFunc(ResizeStatic);
+	glutKeyboardFunc(KeyDownStatic);
+	glutSpecialFunc(SpecialInputStatic);
+	glutMouseFunc(MouseStatic);
+
+	atexit(ShutdownAppStatic);
+
+	m_bVSync = bVSync;
+	SetVSync(m_bVSync);
+
+	const double m_pi = 3.1415926536;
+	m_dDistace = 7.0;
+	m_dAngleZ = m_pi / 2;
+
+	int i;
+	int r, c;
+	for (i = 0; i < 4; i++)
+		m_fBgColor[i] = fBgColor[i];
+
+	for (r = 0; r < 3; r++)
+		for (c = 0; c < 3; c++)
+			m_dLookAt[r][c] = dLookAt[r][c];
+
+	m_dFps = 0.;
+
+	m_Hud.SetPosition(10.0f, 10.0f);
+	m_Hud.SetColor(1.0f, 0.0f, 0.0f);
+
+
+	m_bFullscreen = false;
+
+	if (InitializeApp() == true)
+	{
+		m_bCreated = true;
+		glutMainLoop();
+	}
+}
+
+void CGame::RenderScene()
+{
+	m_nCurrentTime = glutGet(GLUT_ELAPSED_TIME);
+	int nElapsedTime = m_nCurrentTime - m_nPreviousTime;
+
+	if (nElapsedTime < 16.67)
+	{
+		glutPostRedisplay();
+		return;
+	}
+
+	m_nPreviousTime = m_nCurrentTime;
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+
+	m_dLookAt[0][0] = m_dDistace * sin(m_dAngleZ);
+	m_dLookAt[0][1] = 3.5f;
+	m_dLookAt[0][2] = m_dDistace * cos(m_dAngleZ);
+	m_dLookAt[1][1] = 2;
+
+	gluLookAt(m_dLookAt[0][0], m_dLookAt[0][1], m_dLookAt[0][2],
+		m_dLookAt[1][0], m_dLookAt[1][1], m_dLookAt[1][2],
+		m_dLookAt[2][0], m_dLookAt[2][1], m_dLookAt[2][2]);
+
+	DrawCoordinates();
+
+	glEnable(GL_LIGHTING);
+	glEnable(GL_LIGHT0);
+	glEnable(GL_COLOR_MATERIAL);
+
+	glShadeModel(GL_SMOOTH);
+
+	glLightfv(GL_LIGHT0, GL_POSITION, m_LightPosition);
+
+	// 바닥 입력
+	glPushMatrix();
+	glColor3f(0.03f, 0.2f, 0.03f);
+	glTranslatef(0.0f, -0.1f, 0.0f);
+	glScalef(10.0f, 0.2f, 50.0f);
+	DrawCube();
+	glPopMatrix();
+
+
+	// 바닥 생성1
+	glBegin(GL_LINE_LOOP);
+	glPushMatrix(); {    // 제 1면
+		glVertex3f(-2, 0, 2);
+		glVertex3f(2, 0, 2);
+		glVertex3f(2, 0, -2);
+		glVertex3f(-2, 0, -2);
+	}
+	glPopMatrix();
+	glEnd();
+	// 바닥 생성2
+	glBegin(GL_LINE_LOOP);
+	glPushMatrix(); {    // 제 2면
+		glVertex3f(-1, 0.2, 1);
+		glVertex3f(1, 0.2, 1);
+		glVertex3f(1, 0.2, -1);
+		glVertex3f(-1, 0.2, -1);
+	}
+	glPopMatrix();
+	glEnd();
+
+
+
+	glDisable(GL_COLOR_MATERIAL);
+	glDisable(GL_LIGHT0);
+	glDisable(GL_LIGHTING);
+
+	if (m_Sphere.m_fPosition[1] < 0.6f)
+	{
+		m_Sphere.m_fPosition[1] = 0.6f;
+		m_nDirectionZ *= -1;
+
+		if (m_nDirectionZ < 0) m_Sphere.m_fPosition[2] = 4.5;
+		m_nElapsedTime = 0;
+
+		printf("%d, %lf, %lf\n", m_nDirectionZ, m_Sphere.m_fPosition[1], m_Sphere.m_fPosition[2]);
+	}
+
+	m_nFrame++;
+	m_nCurrentTime = glutGet(GLUT_ELAPSED_TIME);
+	if (m_nCurrentTime - m_nBaseTime > 1000)
+	{
+		m_dFps = m_nFrame * 1000.0 / (m_nCurrentTime - m_nBaseTime);
+		m_nBaseTime = m_nCurrentTime;
+		m_nFrame = 0;
+	}
+
+	char FpsText[100];
+	sprintf(FpsText, "FPS: %4.2f", m_dFps);
+
+	m_Hud.SetText(FpsText);
+	m_Hud.DisplayHud(this);
+
+	glutSwapBuffers();
+	glutPostRedisplay();
+}
+
+void CGame::KeyDown(unsigned char key, int x, int y)
+{
+	switch (key)
+	{
+	case 27:
+		exit(0);
+		break;
+
+	case 'v':
+		m_bVSync = !m_bVSync;
+		SetVSync(m_bVSync);
+		break;
+
+	case 'p':
+		m_bPause = !m_bPause;
+		break;
+	}
+}
+
+void CGame::SpecialInput(int key, int x, int y)
+{
+	switch (key)
+	{
+	case GLUT_KEY_UP:
+		m_dDistace += 0.1;
+		break;
+
+	case GLUT_KEY_DOWN:
+		m_dDistace -= 0.1;
+		break;
+
+	case GLUT_KEY_RIGHT:
+		m_dAngleZ += 0.1;
+		break;
+
+	case GLUT_KEY_LEFT:
+		m_dAngleZ -= 0.1;
+		break;
+
+	case GLUT_KEY_F11:
+		if (!m_bFullscreen) {
+			glutFullScreen();
+
+			m_bFullscreen = true;
+		}
+		else if (m_bFullscreen) {
+			glutReshapeWindow(m_nW, m_nH);
+			glutPositionWindow(m_nPosX, m_nPosY);
+
+			m_bFullscreen = false;
+		}
+
+		break;
+	}
+}
+
+void CGame::Resize(int width, int height)
+{
+	glViewport(0, 0, width, height);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	gluPerspective(60, (double)width / (double)height, 0.1, 50.0);
+}
+
+void CGame::Mouse(int button, int state, int x, int y)
+{
+	if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN)
+	{
+
+	}
+}
+
+bool CGame::InitializeApp()
+{
+	glClearColor(m_fBgColor[0], m_fBgColor[1], m_fBgColor[2], m_fBgColor[3]);
+	glEnable(GL_DEPTH_TEST);
+
+	m_LightPosition[0] = 2.0f;
+	m_LightPosition[1] = 10.0f;
+	m_LightPosition[2] = 0.0f;
+	m_LightPosition[3] = 0.0f;
+
+	m_Sphere.SetPosition(0.0f, 0.1f + 0.5f, 4.5f);
+	m_nDirectionZ = -1;
+	m_nElapsedTime = 0;
+	m_Sphere.SetColor(1.0f, 0.5f, 0.2f);
+	m_Sphere.SetRadius(0.5);
+
+	glEnable(GL_NORMALIZE);
+
+	return true;
+}
+
+void CGame::ShutdownApp()
+{
+}
